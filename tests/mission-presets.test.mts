@@ -13,6 +13,7 @@ import {
   VARIANT_DEFAULTS,
   getEffectivePanelConfig,
 } from '../src/config/panels.ts';
+import { STORAGE_KEYS } from '../src/config/variants/base.ts';
 import {
   LAYER_REGISTRY,
   getAllowedLayerKeys,
@@ -629,8 +630,24 @@ describe('mission preset definitions', () => {
         'macro-market-watch',
         'tech-ai-watch',
         'good-news-explorer',
+        'operations-watch',
       ],
     );
+  });
+
+  it('defines the operations mission as a globe-first operational workspace', () => {
+    const preset = getMissionPreset('operations-watch');
+
+    assert.ok(preset);
+    assert.equal(preset.label, 'Watchtower');
+    assert.equal(preset.shortLabel, 'Watchtower');
+    assert.equal(preset.preferredMapMode, 'globe');
+    assert.equal(preset.view, 'global');
+    assert.equal(preset.timeRange, '24h');
+    assert.ok(preset.layers.includes('satellites'));
+    assert.ok(preset.layers.includes('military'));
+    assert.ok(preset.layers.includes('weather'));
+    assert.ok(preset.layers.length < 13, 'must not trigger the high-layer-count warning');
   });
 
   it('uses approachable first-run labels for broad audience personas', () => {
@@ -984,6 +1001,7 @@ async function waitForMissionTimers(): Promise<void> {
 }
 
 function makeMapSpy(options: { isGlobe?: boolean; isDeckGLActive?: boolean } = {}) {
+  let globeMode = options.isGlobe ?? false;
   const state = {
     view: 'global',
     zoom: 2.3,
@@ -995,6 +1013,7 @@ function makeMapSpy(options: { isGlobe?: boolean; isDeckGLActive?: boolean } = {
     setView: [] as Array<{ view: string; zoom?: number }>,
     setTimeRange: [] as string[],
     setLayerLoading: [] as Array<{ layer: string; loading: boolean }>,
+    switchToGlobe: 0,
   };
   return {
     calls,
@@ -1018,13 +1037,17 @@ function makeMapSpy(options: { isGlobe?: boolean; isDeckGLActive?: boolean } = {
       return { lat: 0, lon: 0 };
     },
     isGlobeMode() {
-      return options.isGlobe ?? false;
+      return globeMode;
     },
     isDeckGLActive() {
       return options.isDeckGLActive ?? true;
     },
     setLayerLoading(layer: string, loading: boolean) {
       calls.setLayerLoading.push({ layer, loading });
+    },
+    switchToGlobe() {
+      calls.switchToGlobe += 1;
+      globeMode = true;
     },
   };
 }
@@ -1199,6 +1222,18 @@ describe('mission preset shell integration', () => {
     assert.equal(latestUrl().searchParams.get('view'), 'global');
     assert.equal(latestUrl().searchParams.get('timeRange'), '7d');
     assert.deepEqual((latestUrl().searchParams.get('layers') ?? '').split(',').sort(), baselineLayers);
+  });
+
+  it('enters globe mode through the existing map preference when operations-watch is applied', async () => {
+    const map = makeMapSpy({ isGlobe: false });
+    const { manager } = createMissionHarness({ map });
+
+    manager.applyMissionPreset('operations-watch');
+    await waitForMissionTimers();
+
+    assert.equal(map.calls.switchToGlobe, 1);
+    assert.equal(map.isGlobeMode(), true);
+    assert.equal(readJsonStorage<string>(STORAGE_KEYS.mapMode), 'globe');
   });
 
   it('filters renderer-incompatible preset layers before persisting or running side effects on the mobile fallback renderer', async () => {

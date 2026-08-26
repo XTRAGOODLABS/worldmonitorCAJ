@@ -113,6 +113,7 @@ import { buildEmbedIframeSnippet, buildEmbedMapUrl, type EmbedVariant } from '@/
 import { createSettingsButton } from '@/components/settings-button';
 import { overlayHistory, type OverlayId } from '@/utils/overlay-history';
 import { MobilePrimaryNav } from '@/app/mobile-primary-nav';
+import { OperationsModeController } from '@/components/operations/OperationsModeController';
 import { stageVariantSelection } from '@/services/variant-panel-ownership';
 import { transferSourceGateOwnershipToUser as releaseSourceGateOwnership } from '@/services/source-cap';
 
@@ -288,6 +289,7 @@ export class EventHandlerManager implements AppModule {
   private missionPresetPopover: HTMLElement | null = null;
   private missionPresetReturnFocus: HTMLElement | null = null;
   private missionDataRefreshTimer: number | null = null;
+  private operationsModeController: OperationsModeController | null = null;
   private authStateUnsubscribers: Array<() => void> = [];
   private proGateUnsubscribers: Array<() => void> = [];
   private exportPanelLoad: Promise<NonNullable<AppContext['exportPanel']>> | null = null;
@@ -521,6 +523,8 @@ export class EventHandlerManager implements AppModule {
       this.boundNotifyForCountryHandler = null;
     }
     this.closeMissionPresetPopover();
+    this.operationsModeController?.destroy();
+    this.operationsModeController = null;
     if (this.missionDataRefreshTimer) {
       window.clearTimeout(this.missionDataRefreshTimer);
       this.missionDataRefreshTimer = null;
@@ -803,6 +807,7 @@ export class EventHandlerManager implements AppModule {
 
   private setupMissionPresets(): void {
     this.renderMissionPresetControl();
+    this.reconcileOperationsMode();
 
     const shouldPrompt =
       !this.ctx.isMobile &&
@@ -1110,6 +1115,9 @@ export class EventHandlerManager implements AppModule {
     this.applyPanelSettings();
     this.callbacks.applySavedPanelOrder?.(applied.panelOrder);
     this.ctx.unifiedSettings?.refreshPanelToggles();
+    if (applied.preset.preferredMapMode) {
+      this.applyMapDimension(applied.preset.preferredMapMode);
+    }
     this.ctx.map?.setLayers(mapLayers);
     this.applyMissionMapLayerTransitions(previousMapLayers, mapLayers);
     this.ctx.map?.setView(applied.preset.view as MapView, applied.preset.zoom);
@@ -1117,6 +1125,7 @@ export class EventHandlerManager implements AppModule {
     this.callbacks.mountLiveNewsIfReady?.();
     this.callbacks.syncDataFreshnessWithLayers();
     this.scheduleMissionDataRefresh();
+    this.reconcileOperationsMode();
     this.syncUrlState();
     showToast(`Mission preset applied: ${applied.preset.label}`);
     this.renderMissionPresetControl();
@@ -1138,6 +1147,7 @@ export class EventHandlerManager implements AppModule {
     saveToStorage(STORAGE_KEYS.mapLayers, mapLayers);
     this.persistMissionPanelOrder(reset.panelOrder);
     clearMissionPreset();
+    this.reconcileOperationsMode();
 
     this.applyPanelSettings();
     this.callbacks.applySavedPanelOrder?.(reset.panelOrder);
@@ -1153,6 +1163,34 @@ export class EventHandlerManager implements AppModule {
     showToast('Mission preset reset');
     this.renderMissionPresetControl();
     this.closeMissionPresetPopover();
+  }
+
+  private reconcileOperationsMode(): void {
+    const isActive = loadStoredMissionPreset()?.id === 'operations-watch';
+    if (!isActive) {
+      this.operationsModeController?.destroy();
+      this.operationsModeController = null;
+      return;
+    }
+
+    const mapSection = document.getElementById('mapSection');
+    if (!mapSection) return;
+
+    if (!this.operationsModeController) {
+      this.operationsModeController = new OperationsModeController(mapSection, {
+        getState: () => ({
+          layers: this.ctx.mapLayers,
+          renderer: this.ctx.map
+            ? (this.ctx.map.isGlobeMode() ? 'globe' : 'flat')
+            : 'initializing',
+          timeRange: this.ctx.currentTimeRange,
+          sources: dataFreshness.getAllSources(),
+        }),
+        subscribe: (listener) => dataFreshness.subscribe(listener),
+      });
+    }
+
+    this.operationsModeController.mount();
   }
 
   private setupIdleDetection(): void {
@@ -1243,6 +1281,7 @@ export class EventHandlerManager implements AppModule {
         dataFreshness.setEnabled(sourceId, enabled);
       }
     }
+    this.operationsModeController?.refresh();
 
     if (layer === 'ais') {
       if (enabled) {
@@ -2390,24 +2429,30 @@ export class EventHandlerManager implements AppModule {
     toggle.querySelectorAll<HTMLButtonElement>('.map-dim-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const mode = btn.dataset.mode;
-        if (!mode) return;
-        const isGlobe = mode === 'globe';
-        const alreadyGlobe = this.ctx.map?.isGlobeMode() ?? false;
-        if (isGlobe === alreadyGlobe) return;
-        toggle.querySelectorAll('.map-dim-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        saveToStorage(STORAGE_KEYS.mapMode, isGlobe ? 'globe' : 'flat');
-        if (isGlobe) {
-          this.ctx.map?.switchToGlobe();
-        } else {
-          this.ctx.map?.switchToFlat();
-        }
-        if (this.ctx.mapLayers.resilienceScore && !this.ctx.map?.isDeckGLActive?.()) {
-          this.ctx.mapLayers = { ...this.ctx.mapLayers, resilienceScore: false };
-          saveToStorage(STORAGE_KEYS.mapLayers, this.ctx.mapLayers);
-        }
+        if (mode === 'flat' || mode === 'globe') this.applyMapDimension(mode);
       });
     });
+  }
+
+  private applyMapDimension(mode: 'flat' | 'globe'): void {
+    const isGlobe = mode === 'globe';
+    const toggle = document.getElementById('mapDimensionToggle');
+    toggle?.querySelectorAll<HTMLButtonElement>('.map-dim-btn').forEach((button) => {
+      button.classList.toggle('active', button.dataset.mode === mode);
+    });
+    saveToStorage(STORAGE_KEYS.mapMode, mode);
+
+    const alreadyGlobe = this.ctx.map?.isGlobeMode() ?? false;
+    if (isGlobe !== alreadyGlobe) {
+      if (isGlobe) this.ctx.map?.switchToGlobe();
+      else this.ctx.map?.switchToFlat();
+    }
+
+    if (this.ctx.mapLayers.resilienceScore && !this.ctx.map?.isDeckGLActive?.()) {
+      this.ctx.mapLayers = { ...this.ctx.mapLayers, resilienceScore: false };
+      saveToStorage(STORAGE_KEYS.mapLayers, this.ctx.mapLayers);
+    }
+    this.operationsModeController?.refresh();
   }
 
   private setupMapFullscreen(mapSection: HTMLElement): void {

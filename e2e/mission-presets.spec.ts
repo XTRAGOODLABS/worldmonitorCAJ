@@ -94,7 +94,7 @@ test.describe('mission presets', () => {
     await expect(page.locator('#missionPresetBtn')).toBeVisible({ timeout: 30_000 });
     await openMissionPopover(page);
 
-    await expect(page.locator('.mission-preset-card')).toHaveCount(7);
+    await expect(page.locator('.mission-preset-card')).toHaveCount(8);
     await applyMission(page, 'supply-chain-risk', 'Supply');
 
     await expect(page.locator('.panel[data-panel="supply-chain"]:not(.hidden)')).toBeVisible({ timeout: 30_000 });
@@ -146,6 +146,25 @@ test.describe('mission presets', () => {
       .toBe(false);
   });
 
+  test('operations mission activates the globe HUD and removes it on reset', async ({ page }) => {
+    test.setTimeout(150_000);
+    await setupMissionPage(page, { width: 1440, height: 900 });
+
+    await expect(page.locator('#missionPresetBtn')).toBeVisible({ timeout: 30_000 });
+    await applyMission(page, 'operations-watch', 'Watchtower');
+
+    await expect.poll(() => readJsonLocalStorage<string>(page, 'worldmonitor-map-mode')).toBe('globe');
+    await expect(page.locator('#mapSection')).toHaveClass(/operations-mode-active/);
+    await expect(page.locator('[data-operations-hud]')).toBeVisible();
+    await expect(page.locator('[data-operations-hud]')).toContainText('WATCHTOWER');
+
+    await openMissionPopover(page);
+    await page.locator('[data-mission-reset]').click();
+    await expect.poll(() => readLocalStorage(page, PRESET_KEY)).toBeNull();
+    await expect(page.locator('#mapSection')).not.toHaveClass(/operations-mode-active/);
+    await expect(page.locator('[data-operations-hud]')).toHaveCount(0);
+  });
+
   test('mobile mission picker stays in viewport and applies from the mobile menu', async ({ page }) => {
     await setupMissionPage(page, { width: 390, height: 844 });
     const moreTab = page.locator('[data-mobile-tab="more"]');
@@ -165,7 +184,7 @@ test.describe('mission presets', () => {
 
     const popover = page.locator('.mission-preset-popover');
     await expect(popover).toBeVisible();
-    await expect(page.locator('.mission-preset-card')).toHaveCount(7);
+    await expect(page.locator('.mission-preset-card')).toHaveCount(8);
     const box = await popover.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.x).toBeGreaterThanOrEqual(0);

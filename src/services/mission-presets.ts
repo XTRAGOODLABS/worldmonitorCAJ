@@ -20,7 +20,8 @@ export type MissionPresetId =
   | 'osint-newsroom'
   | 'macro-market-watch'
   | 'tech-ai-watch'
-  | 'good-news-explorer';
+  | 'good-news-explorer'
+  | 'operations-watch';
 
 export type MissionMapView = 'global' | 'america' | 'mena' | 'eu' | 'asia' | 'latam' | 'africa' | 'oceania';
 export type MissionTimeRange = '1h' | '6h' | '24h' | '48h' | '7d' | 'all';
@@ -34,6 +35,7 @@ export interface MissionPreset {
   view: MissionMapView;
   zoom?: number;
   timeRange: MissionTimeRange;
+  preferredMapMode?: 'flat' | 'globe';
   panels: string[];
   layers: Array<keyof MapLayers>;
 }
@@ -323,6 +325,49 @@ export const MISSION_PRESETS: readonly MissionPreset[] = [
       'happiness',
       'speciesRecovery',
       'renewableInstallations',
+    ],
+  },
+  {
+    id: 'operations-watch',
+    label: 'Watchtower',
+    shortLabel: 'Watchtower',
+    description: 'A globe-first command center for live geospatial intelligence.',
+    icon: '◎',
+    view: 'global',
+    zoom: 2.15,
+    timeRange: '24h',
+    preferredMapMode: 'globe',
+    panels: [
+      'map',
+      'live-news',
+      'insights',
+      'strategic-posture',
+      'cii',
+      'strategic-risk',
+      'gdelt-intel',
+      'threat-timeline',
+      'cross-source-signals',
+      'military-correlation',
+      'escalation-correlation',
+      'ucdp-events',
+      'security-advisories',
+      'airline-intel',
+      'live-webcams',
+      'internet-disruptions',
+    ],
+    layers: [
+      'conflicts',
+      'hotspots',
+      'military',
+      'bases',
+      'ais',
+      'flights',
+      'satellites',
+      'ucdpEvents',
+      'weather',
+      'gpsJamming',
+      'outages',
+      'natural',
     ],
   },
 ];
